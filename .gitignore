@@ -1,0 +1,23 @@
+#
+# NOTE! Don't add files that are generated in specific
+# subdirectories here. Add them in the ".gitignore" file
+# in that subdirectory instead.
+#
+# Normal rules
+#
+*.o.d
+*.o
+*.a
+*.s
+*.ko
+*.so
+*.mod.c
+*.cmd
+.tmp_versions
+Module.symvers
+a.out
+*.i
+*.lst
+*.symtypes
+*~
+tags
