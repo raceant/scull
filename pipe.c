@@ -105,12 +105,177 @@ static int scull_p_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static ssize_t scull_p_read(struct file *filp, char __user *buf,
+							size_t count, loff_t *f_pos)
+{
+	struct scull_pipe *dev = filp->private_data;
+
+	if(down_interruptible(&dev->sem))
+		return -ERESTARTSYS;
+
+	while (dev->rp == dev->wp) { // nothing to read
+		up(&dev->sem);
+		if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		PDEBUG("\"%s\" reading:going to sleep\n",current->comm);
+		if (wait_event_interruptible(dev->inq, dev->rp != dev->wp)))
+			return -ERESTARTSYS; // signal: tell the fs layer to handle it
+		// otherwise loop, but first reacquire the lock
+		if(down_interruptible(&dev->sem))
+			return -ERESTARTSYS;
+	}
+
+	if (dev->wp > dev->rp)
+		count = min(count, (size_t)(dev->wp - dev->rp));
+	else
+		count = min(count, (size_t)(dev->end - dev->rp));
+	if (copy_to_user(buf, dev->rp, count)) {
+		up (&dev->sem);
+		return -EFAULT;
+	}
+	dev->rp += count;
+	if (dev->rp == dev->end)
+		dev->rp = dev->buffer;
+	up (&dev->sem);
+
+	// finally, awake any writers and return
+	wake_up_interruptible(&dev->outq);
+	PDEBUG("\"%s\" did read %ld bytes\n",current->comm, (long)count);
+	return count;
+}
+
+static int scull_getwritespace(struct scull_pipe *dev, struct file *filp)
+{
+	while (spacefree(dev) == 0) {
+		DEFINE_WAIT(wait);
+
+		up(&dev->sem);
+		if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		PDEBUG("\"%s\" writing: going to sleep\n",current->comm);
+		prepare_to_wait(&dev->outq, &wait, TASK_INTERRUPTIBLE);
+		if (spacefree(dev) == 0)
+			schedule();
+		finish_wait(&dev->outq, &wait);
+		if (signal_pending(current))
+			return -ERESTARTSYS;	// signal: tell the fs layer to handle it
+		if(down_interruptible(&dev->sem))
+			return -ERESTARTSYS;
+	}
+	return 0;
+}
+
 static int spacefree(struct scull_pipe *dev)
 {
 	if (dev->rp == dev->wp)
 		return dev->buffersize - 1;
 	return ((dev->rp + dev->buffersize - dev->wp) % dev->buffersize) -1;
 }
+
+static ssize_t scull_p_write(struct file *filp, const char __user *buf,
+							 size_t count, loff_t *f_pos)
+{
+	struct scull_pipe *dev = filp->private_data;
+	int result;
+
+	if(down_interruptible(&dev->sem))
+		return -ERESTARTSYS;
+
+	result = scull_getwritespace(dev, filp);
+	if (result)
+		return result;
+
+	// OK, space is there, accept something
+	count = min(count, (size_t)spacefree(dev));
+	if (dev->wp >= dev->rp)
+		count = min(count, (size_t)(dev->end - dev->wp));
+	else
+		count = min(count, (size_t)(dev->rp - dev->wp - 1));
+	PDEBUG("Going to accept %ld bytes to %p from %p\n", (long)count, dev->wp, buf);
+	if (copy_from_user(dev->wp, buf, count)) {
+		up (&dev->sem);
+		return -EFAULT;
+	}
+	dev->wp += count;
+	if (dev->wp == dev->end)
+		dev->wp = dev->buffer;
+	up(&dev->sem);
+
+	// finally, awake any reader
+	wake_up_interruptible(&dev->inq);
+
+	// and signal asynchronous readers
+	if (dev->async_queue)
+		kill_fasync(&dev->async_queue, SIGIO, POLL_IN);
+	PDEBUG("\"%s\" did write %ld bytes\n", current->comm, (long)count);
+	return count;
+}
+
+static unsigned int scull_p_poll(struct file *filp, poll_table *wait)
+{
+	struct scull_pipe *dev = filp->private_data;
+	unsigned int mask = 0;
+
+	down(&dev->sem);
+	poll_wait(filp, &dev->inq, wait);
+	poll_wait(filp, &dev->outq, wait);
+	if (dev->rp != dev->wp)
+		mask |= POLLIN | POLLRDNORM;	//readable
+	if (spacefree(dev))
+		mask |= POLLOUT | POLLWRNORM;	//writeable
+	up(&dec->sem);
+	return mask;
+}
+
+static int scull_p_fasync(int fd, struct file *filp, int mode)
+{
+	struct scull_pipe *dev = filp->private_data;
+
+	return fasync_helper(fd, filp, mode, &dev->async_queue);
+}
+
+#ifdef SCULL_DEBUG
+// FIXME this should use seq_file
+static void scull_p_proc_offset(char *buf, char **start, off_t *offset, int *len)
+{
+	if (*offset ==0)
+		return;
+	if (*offset >= *len) {
+		*offset -= *len;
+		*len = 0;
+	} else { //we are into the interesting stuff now
+		*start = buf + *offset;
+		*offset = 0;
+	}
+}
+
+static int scull_read_p_mem(char *buf, char **start, off_t offset, int count, int *eof, void *data)
+{
+	int i, len;
+	struct scull_pipe *p;
+
+#define LIMIT (PAGE_SIZE-200)  // don't print any more after this size
+	*start = buf;
+	len = sprintf(buf, "Default buffersize is %d\n",scull_p_buffer);
+	for (i = 0; i<scull_p_nr_devs && len<=LIMIT; i++) {
+		p = &scull_p_devices[i];
+		if (down_interruptible(&p->sem))
+			return -ERESTARTSYS;
+		len += sprintf(buf + len, "\nDevice %d: %p\n", i, p);
+
+		// len += sprintf(buf + len, "   Queues: %p   %p\n", p->inq, p->outp);
+		len += sprintf(buf + len, i"    buffer: %p to %p (%d bytes)\n", p->buffer, p->end, p->buffersize);
+		len += sprintf(buf + len, "     rp %p      wp %p\n", p->rp, p->wp);
+		len += sprintf(buf + len, "     readers %d   writers %d\n", p->nreaders, p->nwriters);
+		up(&p->sem);
+		scull_p_proc_offset(buf, start, &offset, &len);
+	}
+	*eof = (len <= LIMIT);
+	return len;
+}
+
+#endif
+
 
 struct file_operations scull_pipe_fops = {
 	.owner	= THIS_MODULE,
@@ -123,3 +288,69 @@ struct file_operations scull_pipe_fops = {
 	.release= scull_p_release,
 	.fasync	= scull_p_fasync,
 };
+
+/*
+ * Set up a cdev entry.
+ */
+static void scull_p_setup_cdev(struct scull_pipe *dev, int index)
+{
+	int err, devno = scull_p_devno + index;
+
+	cdev_init(&dev->cdev, &scull_pipe_fops);
+	dev->cdev.owner = THIS_MODULE;
+	err = cdev_add (&dev->cdev, devno, 1);
+	if (err)
+		printk(KERN_NOTICE "Error %d adding scullpipe%d", err, index);
+}
+
+/*
+ * Initialize the pipe devs; return how many we did
+ */
+int scull_p_init(dev_t firstdev)
+{
+	int i,result;
+
+	result = register_chrdev_region(firstdev, scull_p_nr_devs, "scullp");
+	if (result < 0) {
+		printk(KERN_NOTICE "Unable to get scullp region, error %d\n", result);
+		return 0;
+	}
+	scull_p_devno = firstdev;
+	scull_p_devices = kmalloc(scull_p_nr_devs * sizeof(struct scull_pipe), GFP_KERNEL);
+	if (scull_p_devices == NULL) {
+		unregister_chrdev_region(firstdev, scull_p_nr_devs);
+		return 0;
+	}
+	memset(scull_p_devices, 0, scull_p_nr_devs * sizeof(struct scull_pipe));
+	for (i = 0; i < scull_p_nr_devs; i++) {
+		init_waitqueue_head(&(scull_p_devices[i].inq));
+		init_waitqueue_head(&(scull_p_devices[i].outq));
+		init_MUTEX(&scull_p_devices[i].sem);
+		scull_p_setup_cdev(struct_p_devices + i, i);
+	}
+
+#ifdef SCULL_DEBUG
+	create_proc_read_entry("scullpipe", 0, NULL, scull_read_p_mem, NULL);
+#endif
+	return scull_p_nr_devs;
+}
+
+void scull_p_cleanup(void)
+{
+	int i;
+
+#ifdef
+	remove_proc_entry("scullpipe", NULL);
+#endif
+
+	if (!scull_p_devices)
+		return ;
+
+	for (i = 0; i < scull_p_nr_devs; i++) {
+		cdev_del(&scull_p_devices[i].cdev);
+		kfree(scull_p_devices[i].buffer);
+	}
+	kfree(scull_p_devices);
+	unregister_chrdev_region(scull_p_devno, scull_p_nr_devs);
+	scull_p_devices = NULL;
+}

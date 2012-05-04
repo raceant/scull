@@ -444,13 +444,13 @@ int scull_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsign
  * * write less code. Actually, it's the same driver, isn't it?
  * */
 
-//	case SCULL_P_IOCTSIZE:
-//		scull_p_buffer = arg;
-//		break;
-//
-//	case SCULL_P_IOCQSIZE:
-//		return scull_p_buffer;
-//
+	case SCULL_P_IOCTSIZE:
+		scull_p_buffer = arg;
+		break;
+
+	case SCULL_P_IOCQSIZE:
+		return scull_p_buffer;
+
 
 	default:  /* redundant, as cmd was checked against MAXNR */
 		return -ENOTTY;
@@ -515,7 +515,7 @@ void scull_cleanup_module(void)
 
 	unregister_chrdev_region(devno, scull_nr_devs);
 
-//	scull_p_cleanup();
+	scull_p_cleanup();
 //	scull_access_cleanup();
 }
 
@@ -565,7 +565,7 @@ int scull_init_module(void)
 	}
 
 	dev = MKDEV(scull_major, scull_minor + scull_nr_devs);
-	//dev += scull_p_init(dev);
+	dev += scull_p_init(dev);
 	//dev += scull_access_init(dev);
 
 #ifdef SCULL_DEBUG
