@@ -11,6 +11,7 @@ endif
 CFLAGS += $(DEBFLAGS)
 
 ifneq ($(KERNELRELEASE),)
+		scull-objs := main.o pipe.o 
 		obj-m := scull.o 
 
 # Otherwise we were called directly from the command

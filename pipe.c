@@ -46,6 +46,7 @@ struct scull_pipe {
  */
 static int scull_p_nr_devs = SCULL_P_NR_DEVS;	// number of pipe devices
 int scull_p_buffer = SCULL_P_BUFFER;
+
 dev_t scull_p_devno;		// Our first device number
 
 module_param(scull_p_nr_devs, int, 0);
@@ -61,7 +62,7 @@ static int scull_p_open(struct inode *inode, struct file *filp)
 	struct scull_pipe *dev;
 
 	dev = container_of(inode->i_cdev, struct scull_pipe, cdev);
-	file->private_data = dev;
+	filp->private_data = dev;
 
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
@@ -69,7 +70,7 @@ static int scull_p_open(struct inode *inode, struct file *filp)
 		dev->buffer = kmalloc(scull_p_buffer, GFP_KERNEL);
 		if (!dev->buffer) {
 			up(&dev->sem);
-			return -ENMEM;
+			return -ENOMEM;
 		}
 	}
 	dev->buffersize = scull_p_buffer;
@@ -118,7 +119,7 @@ static ssize_t scull_p_read(struct file *filp, char __user *buf,
 		if (filp->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 		PDEBUG("\"%s\" reading:going to sleep\n",current->comm);
-		if (wait_event_interruptible(dev->inq, dev->rp != dev->wp)))
+		if (wait_event_interruptible(dev->inq, dev->rp != dev->wp))
 			return -ERESTARTSYS; // signal: tell the fs layer to handle it
 		// otherwise loop, but first reacquire the lock
 		if(down_interruptible(&dev->sem))
@@ -223,7 +224,7 @@ static unsigned int scull_p_poll(struct file *filp, poll_table *wait)
 		mask |= POLLIN | POLLRDNORM;	//readable
 	if (spacefree(dev))
 		mask |= POLLOUT | POLLWRNORM;	//writeable
-	up(&dec->sem);
+	up(&dev->sem);
 	return mask;
 }
 
@@ -264,7 +265,7 @@ static int scull_read_p_mem(char *buf, char **start, off_t offset, int count, in
 		len += sprintf(buf + len, "\nDevice %d: %p\n", i, p);
 
 		// len += sprintf(buf + len, "   Queues: %p   %p\n", p->inq, p->outp);
-		len += sprintf(buf + len, i"    buffer: %p to %p (%d bytes)\n", p->buffer, p->end, p->buffersize);
+		len += sprintf(buf + len, "    buffer: %p to %p (%d bytes)\n", p->buffer, p->end, p->buffersize);
 		len += sprintf(buf + len, "     rp %p      wp %p\n", p->rp, p->wp);
 		len += sprintf(buf + len, "     readers %d   writers %d\n", p->nreaders, p->nwriters);
 		up(&p->sem);
@@ -326,7 +327,7 @@ int scull_p_init(dev_t firstdev)
 		init_waitqueue_head(&(scull_p_devices[i].inq));
 		init_waitqueue_head(&(scull_p_devices[i].outq));
 		init_MUTEX(&scull_p_devices[i].sem);
-		scull_p_setup_cdev(struct_p_devices + i, i);
+		scull_p_setup_cdev(scull_p_devices + i, i);
 	}
 
 #ifdef SCULL_DEBUG
@@ -339,7 +340,7 @@ void scull_p_cleanup(void)
 {
 	int i;
 
-#ifdef
+#ifdef SCULL_DEBUG
 	remove_proc_entry("scullpipe", NULL);
 #endif
 
