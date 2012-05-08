@@ -38,3 +38,24 @@ ln -sf ${device}pipe0 /dev/${device}pipe
 
 chgrp $group /dev/${device}pipe[0-3]
 chmod $mode  /dev/${device}pipe[0-3]
+
+
+rm -f /dev/${device}single
+mknod /dev/${device}single  c $major 8
+chgrp $group /dev/${device}single
+chmod $mode  /dev/${device}single
+
+rm -f /dev/${device}uid
+mknod /dev/${device}uid   c $major 9
+chgrp $group /dev/${device}uid
+chmod $mode  /dev/${device}uid
+
+rm -f /dev/${device}wuid
+mknod /dev/${device}wuid  c $major 10
+chgrp $group /dev/${device}wuid
+chmod $mode  /dev/${device}wuid
+
+rm -f /dev/${device}priv
+mknod /dev/${device}priv  c $major 11
+chgrp $group /dev/${device}priv
+chmod $mode  /dev/${device}priv

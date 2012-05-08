@@ -25,6 +25,7 @@
 #include <linux/types.h>	/* size_t */
 #include <linux/fcntl.h>
 #include <linux/poll.h>
+#include <linux/sched.h> // current
 #include <linux/cdev.h>
 #include <asm/uaccess.h>
 

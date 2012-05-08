@@ -516,7 +516,7 @@ void scull_cleanup_module(void)
 	unregister_chrdev_region(devno, scull_nr_devs);
 
 	scull_p_cleanup();
-//	scull_access_cleanup();
+	scull_access_cleanup();
 }
 
 static void scull_setup_cdev(struct scull_dev *dev, int index)
@@ -566,7 +566,7 @@ int scull_init_module(void)
 
 	dev = MKDEV(scull_major, scull_minor + scull_nr_devs);
 	dev += scull_p_init(dev);
-	//dev += scull_access_init(dev);
+	dev += scull_access_init(dev);
 
 #ifdef SCULL_DEBUG
 	scull_create_proc();
