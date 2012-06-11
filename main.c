@@ -12,6 +12,7 @@
 #include <linux/capability.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/device.h>
 
 #include <asm/uaccess.h>	// copy_*_user
 #include "scull.h"
@@ -486,6 +487,8 @@ loff_t scull_llseek(struct file *filp, loff_t off, int whence)
 	return newpos;
 }
 
+struct class *scull_class;
+
 struct file_operations scull_fops = {
 	.owner	= THIS_MODULE,
 	.llseek	= scull_llseek,
@@ -514,9 +517,14 @@ void scull_cleanup_module(void)
 #endif
 
 	unregister_chrdev_region(devno, scull_nr_devs);
+	for (i = 0; i < scull_nr_devs; i++) {
+		class_device_destroy(scull_class, MKDEV(scull_major, scull_minor + i));
+	}
 
 	scull_p_cleanup();
 	scull_access_cleanup();
+
+	class_destroy(scull_class);
 }
 
 static void scull_setup_cdev(struct scull_dev *dev, int index)
@@ -564,7 +572,18 @@ int scull_init_module(void)
 		scull_setup_cdev(&scull_devices[i], i);
 	}
 
+	scull_class = class_create(THIS_MODULE, "scull");
+	if (IS_ERR(scull_class)) {
+		printk("err:failed in scull class.\n");
+		result = -1;
+		goto fail;
+	}
+
 	dev = MKDEV(scull_major, scull_minor + scull_nr_devs);
+	for (i = 0; i < scull_nr_devs; i++) {
+		class_device_create(scull_class, NULL, MKDEV(scull_major, scull_minor + i), NULL, "scull%d",i);
+	}
+
 	dev += scull_p_init(dev);
 	dev += scull_access_init(dev);
 

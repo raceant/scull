@@ -29,6 +29,7 @@
 #include <asm/atomic.h>
 #include <linux/list.h>
 #include <linux/sched.h> // current
+#include <linux/device.h>
 
 #include "scull.h"        /* local definitions */
 
@@ -364,7 +365,6 @@ static void scull_access_setup (dev_t devno, struct scull_adev_info *devinfo)
 		printk(KERN_NOTICE "%s registered at %x\n", devinfo->name, devno);
 }
 
-
 int scull_access_init(dev_t firstdev)
 {
 	int result, i;
@@ -380,6 +380,10 @@ int scull_access_init(dev_t firstdev)
 	/* Set up each device. */
 	for (i = 0; i < SCULL_N_ADEVS; i++)
 		scull_access_setup (firstdev + i, scull_access_devs + i);
+
+	for (i = 0; i < SCULL_N_ADEVS; i++)
+		class_device_create(scull_class, NULL, firstdev + i, NULL, scull_access_devs[i].name );
+
 	return SCULL_N_ADEVS;
 }
 
@@ -408,5 +412,10 @@ void scull_access_cleanup(void)
 
 	/* Free up our number space */
 	unregister_chrdev_region(scull_a_firstdev, SCULL_N_ADEVS);
+
+	for (i = 0; i < SCULL_N_ADEVS; i++) {
+		class_device_destroy(scull_class, scull_a_firstdev + i);
+	}
+
 	return;
 }

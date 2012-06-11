@@ -19,6 +19,7 @@
 #define _SCULL_H_
 
 #include <linux/ioctl.h> /* needed for the _IOW etc stuff used later */
+#include <linux/device.h>
 
 /*
  * Macros to help debugging
@@ -85,6 +86,7 @@ struct scull_qset {
 	struct scull_qset *next;	/* 下一个链表节点（链表项） */
 };
 
+
 /* 我们自己的设备(包含了基本的cdev字符设备结构) */
 struct scull_dev {
 	struct scull_qset *data;  /* Pointer to first quantum set (链表的头)*/
@@ -112,6 +114,7 @@ extern int scull_quantum;
 extern int scull_qset;
 
 extern int scull_p_buffer;	/* pipe.c */
+extern struct class *scull_class;
 
 
 /*
@@ -123,7 +126,6 @@ void    scull_p_cleanup(void);
 int     scull_access_init(dev_t dev);
 void    scull_access_cleanup(void);
 
-int     scull_trim(struct scull_dev *dev);
 
 ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
                    loff_t *f_pos);

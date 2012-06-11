@@ -331,6 +331,10 @@ int scull_p_init(dev_t firstdev)
 		scull_p_setup_cdev(scull_p_devices + i, i);
 	}
 
+	for (i = 0; i < scull_p_nr_devs; i++) {
+		class_device_create(scull_class, NULL, firstdev + i, NULL, "scullpipe%d",i);
+	}
+
 #ifdef SCULL_DEBUG
 	create_proc_read_entry("scullpipe", 0, NULL, scull_read_p_mem, NULL);
 #endif
@@ -354,5 +358,9 @@ void scull_p_cleanup(void)
 	}
 	kfree(scull_p_devices);
 	unregister_chrdev_region(scull_p_devno, scull_p_nr_devs);
+
+	for (i = 0; i < scull_p_nr_devs; i++) {
+		class_device_destroy(scull_class, scull_p_devno + i);
+	}
 	scull_p_devices = NULL;
 }
